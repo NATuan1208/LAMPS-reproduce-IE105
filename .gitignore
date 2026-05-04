@@ -1,0 +1,54 @@
+# ── Environment & Secrets ──────────────────────────────────────────────────────
+.env
+*.env.local
+*.env.production
+
+# ── Claude Code IDE ────────────────────────────────────────────────────────────
+.claude/
+
+# ── Python ─────────────────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# ── Dataset files (large + contain malicious source code) ──────────────────────
+# Reconstruct using: python scripts/extract_datadog.py && python scripts/codebert_label.py
+D2_dataset/
+scripts/extracted_malicious/
+scripts/d1_hashes.json
+scripts/datadog_raw_metadata.json
+scripts/labeled_metadata.json
+
+# ── External cloned repositories ───────────────────────────────────────────────
+malicious-software-packages-dataset/
+tmp_lamps_jss/
+pypi_malregistry/
+
+# ── Generated metrics (large JSON, reproducible by re-running evaluation) ──────
+outputs/d1_metrics*.json
+outputs/d2_metrics*.json
+
+# ── Intermediate build artifacts ───────────────────────────────────────────────
+artifacts/
+
+# ── OS & Editor ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.iml
