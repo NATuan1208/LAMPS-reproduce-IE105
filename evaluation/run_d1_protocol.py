@@ -1,12 +1,17 @@
 import argparse
+import csv
 import json
 import logging
+import os
 import subprocess
-import csv
+import time
 from pathlib import Path
-from tqdm import tqdm
+
+import psutil
 import torch
+from tqdm import tqdm
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
 from evaluation.metrics import compute_metrics
 
 logger = logging.getLogger(__name__)
@@ -86,14 +91,29 @@ def main() -> None:
     
     print(f"Loaded {len(records)} records.")
 
+    # Token-length stats (separate load — not counted in inference timing)
+    _tok_stats = AutoTokenizer.from_pretrained(args.model_id)
+    token_lengths = [
+        len(_tok_stats.encode(r["text"], add_special_tokens=False, truncation=False))
+        for r in records
+    ]
+    print(f"Token stats: mean={sum(token_lengths)/len(token_lengths):.1f}  max={max(token_lengths)}")
+
     y_true = [r["label"] for r in records]
+    _proc = psutil.Process(os.getpid())
+    _t_start = time.perf_counter()
     y_pred = predict_binary_batch(args.model_id, records,
                                   batch_size=args.batch_size,
                                   max_length=args.max_length)
+    _t_end = time.perf_counter()
+    _mem_info = _proc.memory_info()
+    _peak_bytes = getattr(_mem_info, "peak_wset", _mem_info.rss)
     metrics = compute_metrics(y_true, y_pred)
 
+    _infer_s = _t_end - _t_start
+    _n = len(records)
     payload = {
-        "records": len(records),
+        "records": _n,
         "dataset": "D1",
         "metrics": {
             "accuracy": metrics.accuracy,
@@ -105,6 +125,15 @@ def main() -> None:
             "tn": metrics.tn,
             "fp": metrics.fp,
             "fn": metrics.fn,
+        },
+        "performance_metrics": {
+            "inference_time_seconds": round(_infer_s, 3),
+            "latency_ms_per_file": round(1000 * _infer_s / _n, 3) if _n else 0.0,
+            "throughput_files_per_second": round(_n / _infer_s, 3) if _infer_s > 0 else 0.0,
+            "peak_memory_gb": round(_peak_bytes / 1e9, 4),
+            "mean_tokens_per_file": round(sum(token_lengths) / len(token_lengths), 1) if token_lengths else 0.0,
+            "total_tokens_processed": sum(token_lengths),
+            "note": "inference_time includes model loading (~10s) — model load is coupled inside predict_binary_batch",
         },
     }
 

