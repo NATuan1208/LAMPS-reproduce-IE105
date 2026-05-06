@@ -15,10 +15,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+import psutil
 import torch
 from tqdm import tqdm
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -32,6 +35,13 @@ DATASET_ROOT = Path("D2_dataset")
 METADATA_FILE = DATASET_ROOT / "metadata.json"
 
 MAX_LENGTH = 512
+HEAD_TOKENS = 256
+TAIL_TOKENS = 256
+CHUNK_SIZE = 510         # tokens per sliding-window chunk (leaves 2 slots for CLS + SEP)
+CHUNK_STEP = 256         # stride between consecutive chunks (50% overlap)
+MAX_FILE_TOKENS = 4096   # cap before chunking — files >4096 tokens are obfuscated data blobs;
+                         # empirically justified: head baseline Recall=100%, so all D2 malicious
+                         # signals live within first 512 tokens; cap covers any code-based evasion
 DEFAULT_THRESHOLD = 0.5
 
 
@@ -67,14 +77,41 @@ def _load_model(model_id: str, device: torch.device):
     return tokenizer, model
 
 
+def _head_tail_text(
+    text: str,
+    tokenizer,
+    head: int = HEAD_TOKENS,
+    tail: int = TAIL_TOKENS,
+) -> str:
+    """Return text reconstructed from first `head` + last `tail` tokens.
+
+    For files short enough to fit in 512 tokens, the original text is returned
+    unchanged. For longer files this ensures the payload-rich tail is visible
+    to CodeBERT instead of being silently truncated away.
+    """
+    ids = tokenizer.encode(text, add_special_tokens=False, truncation=False)
+    if len(ids) <= head + tail:
+        return text
+    head_text = tokenizer.decode(ids[:head], skip_special_tokens=True)
+    tail_text = tokenizer.decode(ids[-tail:], skip_special_tokens=True)
+    return head_text + "\n" + tail_text
+
+
 def _predict_batch(
     texts: list[str],
     tokenizer,
     model,
     device: torch.device,
     threshold: float,
+    strategy: str = "head",
 ) -> list[float]:
-    """Return per-sample malicious probabilities."""
+    """Return per-sample malicious probabilities.
+
+    strategy="head"      — standard truncation (first 512 tokens only).
+    strategy="head_tail" — keep first HEAD_TOKENS + last TAIL_TOKENS tokens.
+    """
+    if strategy == "head_tail":
+        texts = [_head_tail_text(t, tokenizer) for t in texts]
     encoded = tokenizer(
         texts,
         max_length=MAX_LENGTH,
@@ -91,12 +128,111 @@ def _predict_batch(
     return probs.cpu().tolist()
 
 
+def _sliding_window_chunks(
+    text: str,
+    tokenizer,
+    chunk_size: int = CHUNK_SIZE,
+    step: int = CHUNK_STEP,
+) -> list[list[int]]:
+    """Split `text` into overlapping token-ID chunks.
+
+    Each chunk is at most `chunk_size` raw token IDs (no special tokens).
+    Short files produce exactly one chunk, making sliding window a strict
+    superset of the head strategy — FN cannot increase vs. head baseline.
+    """
+    ids = tokenizer.encode(text, add_special_tokens=False, truncation=False)
+    ids = ids[:MAX_FILE_TOKENS]  # cap: blobs >4096 tokens have signal in head already
+    if len(ids) <= chunk_size:
+        return [ids]
+    chunks = []
+    for start in range(0, len(ids), step):
+        chunk = ids[start : start + chunk_size]
+        if chunk:
+            chunks.append(chunk)
+    return chunks
+
+
+def _encode_chunk_batch(
+    chunk_ids_list: list[list[int]],
+    tokenizer,
+    device: torch.device,
+) -> dict:
+    """Wrap raw token-ID chunks with CLS/SEP and pad to a batch tensor.
+
+    Operates directly on token IDs — no decode/re-encode round-trip.
+    """
+    cls_id = tokenizer.cls_token_id
+    sep_id = tokenizer.sep_token_id
+    pad_id = tokenizer.pad_token_id
+
+    seqs = [[cls_id] + ids + [sep_id] for ids in chunk_ids_list]
+    max_len = max(len(s) for s in seqs)
+
+    input_ids, attention_mask = [], []
+    for seq in seqs:
+        pad = max_len - len(seq)
+        input_ids.append(seq + [pad_id] * pad)
+        attention_mask.append([1] * len(seq) + [0] * pad)
+
+    return {
+        "input_ids": torch.tensor(input_ids, dtype=torch.long).to(device),
+        "attention_mask": torch.tensor(attention_mask, dtype=torch.long).to(device),
+    }
+
+
+def _predict_all_sliding_window(
+    readable: list[dict],
+    tokenizer,
+    model,
+    device: torch.device,
+    batch_size: int,
+    chunk_size: int = CHUNK_SIZE,
+    step: int = CHUNK_STEP,
+) -> dict[str, float]:
+    """Run sliding-window inference and return max prob per file.
+
+    All chunks from all files are flattened into one stream and processed
+    in batches, then aggregated by file index (max pooling).
+    """
+    # Build flat (file_idx, chunk_ids) list across all files
+    all_chunks: list[tuple[int, list[int]]] = []
+    for file_idx, rec in enumerate(readable):
+        for chunk_ids in _sliding_window_chunks(rec["content"], tokenizer, chunk_size, step):
+            all_chunks.append((file_idx, chunk_ids))
+
+    logger.info(
+        "Sliding window: %d total chunks from %d files (avg %.1f chunks/file)",
+        len(all_chunks), len(readable), len(all_chunks) / len(readable),
+    )
+
+    # Batch inference over all chunks
+    chunk_probs: list[float] = []
+    for i in tqdm(range(0, len(all_chunks), batch_size), desc="Predicting D2 (sliding)"):
+        batch_chunk_ids = [ids for _, ids in all_chunks[i : i + batch_size]]
+        encoded = _encode_chunk_batch(batch_chunk_ids, tokenizer, device)
+        with torch.no_grad():
+            logits = model(**encoded).logits
+            if logits.shape[-1] == 1:
+                probs = torch.sigmoid(logits).squeeze(-1)
+            else:
+                probs = torch.sigmoid(logits[:, 1])
+        chunk_probs.extend(probs.cpu().tolist())
+
+    # Aggregate: max prob across all chunks per file
+    file_max: dict[int, float] = {}
+    for (file_idx, _), prob in zip(all_chunks, chunk_probs):
+        file_max[file_idx] = max(file_max.get(file_idx, 0.0), prob)
+
+    return {readable[idx]["filename"]: file_max[idx] for idx in file_max}
+
+
 def run_d2_evaluation(
     model_id: str,
     output_path: Path,
     batch_size: int = 32,
     threshold: float = DEFAULT_THRESHOLD,
     dry_run: bool = False,
+    strategy: str = "head",
 ) -> dict:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info("Device: %s", device)
@@ -151,16 +287,34 @@ def run_d2_evaluation(
 
     # ── Batch inference on readable files ─────────────────────────────────────
     readable = [r for r in flat_records if r["content"] is not None]
-    logger.info("Running inference on %d readable files (batch_size=%d) ...", len(readable), batch_size)
+    logger.info("Running inference on %d readable files (batch_size=%d, strategy=%s) ...", len(readable), batch_size, strategy)
+
+    # Token length analysis — count files that exceed MAX_LENGTH (G4 quantification)
+    logger.info("Computing token length distribution ...")
+    token_lengths = [len(tokenizer.encode(r["content"], add_special_tokens=False, truncation=False)) for r in readable]
+    files_exceeding = sum(1 for l in token_lengths if l > MAX_LENGTH)
+    logger.info("Files exceeding %d tokens: %d / %d (%.1f%%)", MAX_LENGTH, files_exceeding, len(readable), 100 * files_exceeding / len(readable) if readable else 0)
+
+    _proc = psutil.Process(os.getpid())
+    _t_infer_start = time.perf_counter()
 
     # predicted_prob[filename] = malicious probability
     predicted_prob: dict[str, float] = {}
-    for i in tqdm(range(0, len(readable), batch_size), desc="Predicting D2"):
-        batch = readable[i : i + batch_size]
-        texts = [r["content"] for r in batch]
-        probs = _predict_batch(texts, tokenizer, model, device, threshold)
-        for rec, prob in zip(batch, probs):
-            predicted_prob[rec["filename"]] = prob
+    if strategy == "sliding_window":
+        predicted_prob = _predict_all_sliding_window(
+            readable, tokenizer, model, device, batch_size
+        )
+    else:
+        for i in tqdm(range(0, len(readable), batch_size), desc="Predicting D2"):
+            batch = readable[i : i + batch_size]
+            texts = [r["content"] for r in batch]
+            probs = _predict_batch(texts, tokenizer, model, device, threshold, strategy=strategy)
+            for rec, prob in zip(batch, probs):
+                predicted_prob[rec["filename"]] = prob
+
+    _t_infer_end = time.perf_counter()
+    _mem_info = _proc.memory_info()
+    _peak_bytes = getattr(_mem_info, "peak_wset", _mem_info.rss)
 
     # ── Build per-file results ────────────────────────────────────────────────
     file_results = []
@@ -223,12 +377,26 @@ def run_d2_evaluation(
             "threshold": threshold,
             "batch_size": batch_size,
             "device": str(device),
+            "strategy": strategy,
         },
         "data_summary": {
             "total_files": len(flat_records),
             "total_packages": len(all_packages),
             "read_failures": read_failed,
             "files_inferred": len(readable),
+        },
+        "token_length_stats": {
+            "files_total": len(readable),
+            "files_exceeding_512": files_exceeding,
+            "pct_exceeding_512": round(100 * files_exceeding / len(readable), 2) if readable else 0.0,
+        },
+        "performance_metrics": {
+            "inference_time_seconds": round(_t_infer_end - _t_infer_start, 3),
+            "latency_ms_per_file": round(1000 * (_t_infer_end - _t_infer_start) / len(readable), 3) if readable else 0.0,
+            "throughput_files_per_second": round(len(readable) / (_t_infer_end - _t_infer_start), 3) if (_t_infer_end - _t_infer_start) > 0 else 0.0,
+            "peak_memory_gb": round(_peak_bytes / 1e9, 4),
+            "mean_tokens_per_file": round(sum(token_lengths) / len(token_lengths), 1) if token_lengths else 0.0,
+            "total_tokens_processed": sum(token_lengths),
         },
         "file_level_metrics": {
             "accuracy": file_metrics.accuracy,
@@ -298,6 +466,16 @@ def main() -> None:
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     parser.add_argument("--dry_run", action="store_true", help="Load dataset only, skip inference")
+    parser.add_argument(
+        "--strategy",
+        choices=["head", "head_tail", "sliding_window"],
+        default="head",
+        help=(
+            "'head': first 512 tokens only (paper baseline). "
+            "'head_tail': first 256 + last 256 tokens (G4 partial fix). "
+            "'sliding_window': overlapping 512-token chunks, max-pool prob (G4 full coverage, ~2x slower)."
+        ),
+    )
     args = parser.parse_args()
 
     run_d2_evaluation(
@@ -306,6 +484,7 @@ def main() -> None:
         batch_size=args.batch_size,
         threshold=args.threshold,
         dry_run=args.dry_run,
+        strategy=args.strategy,
     )
 
 
