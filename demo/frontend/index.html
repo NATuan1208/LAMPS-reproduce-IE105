@@ -44,6 +44,7 @@
       color: var(--text);
       min-height: 100vh;
       -webkit-font-smoothing: antialiased;
+      font-size: 110%; /* Increase base font size for better visibility */
     }
 
     .syne { font-family: 'Syne', sans-serif; }
@@ -106,11 +107,11 @@
 
     /* ── Badges ────────────────────────────────────────────────── */
     .badge {
-      padding: 1px 7px;
+      padding: 0.15rem 0.5rem;
       border-radius: 4px;
-      font-size: .66rem;
+      font-size: 0.85rem;
       font-family: 'JetBrains Mono', monospace;
-      font-weight: 500;
+      font-weight: 600;
       border: 1px solid;
       display: inline-block;
     }
@@ -124,12 +125,12 @@
       display: flex;
       align-items: center;
       gap: .625rem;
-      margin-bottom: .875rem;
+      margin-bottom: 1.25rem;
     }
     .section-label h2 {
       font-family: 'Syne', sans-serif;
-      font-size: .72rem;
-      font-weight: 700;
+      font-size: 0.95rem;
+      font-weight: 800;
       letter-spacing: .1em;
       text-transform: uppercase;
       color: var(--muted);
@@ -220,8 +221,33 @@
     .code-block { background: #f6f8fa; border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; }
     .code-header { padding: .5rem .875rem; border-bottom: 1px solid var(--border); background: var(--surface-2); display: flex; align-items: center; gap: .5rem; }
 
+    /* Nav Indicator active states */
+    li.active .nav-indicator { border-color: var(--blue); background: var(--blue); box-shadow: 0 0 0 3px rgba(35,84,230,.15); }
+    li.active { color: var(--text) !important; }
+    li.done .nav-indicator { border-color: var(--green); background: var(--green); }
+    li.done { color: var(--text) !important; }
+
     /* Hidden utility */
     .hidden { display: none !important; }
+
+    @media (max-width: 900px) {
+      main {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 2rem !important;
+      }
+      #pkg-grid {
+        grid-template-columns: 1fr !important;
+      }
+      #pipeline-sidebar {
+        position: static !important;
+        width: 100%;
+      }
+      .verdict-card {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
   </style>
 </head>
 <body>
@@ -232,22 +258,25 @@
   background: rgba(255,255,255,.92); backdrop-filter: blur(10px);
   border-bottom: 1.5px solid var(--border);
 ">
-  <div style="max-width: 880px; margin: 0 auto; padding: .75rem 1.25rem; display: flex; align-items: center; gap: .75rem;">
-    <span class="syne" style="font-size: 1.05rem; font-weight: 800; letter-spacing: -.01em; color: var(--text);">LAMPS</span>
-    <span style="width: 1px; height: 16px; background: var(--border); flex-shrink: 0;"></span>
-    <span class="mono" style="font-size: .68rem; color: var(--muted);">Package Security Scanner · CodeBERT · IE105 / UIT 2025–2026</span>
+  <div style="max-width: 1080px; margin: 0 auto; padding: 1rem 1.25rem; display: flex; align-items: center; gap: 1rem;">
+    <span class="syne" style="font-size: 1.25rem; font-weight: 800; letter-spacing: -.01em; color: var(--text);">LAMPS</span>
+    <span style="width: 1.5px; height: 20px; background: var(--border); flex-shrink: 0;"></span>
+    <span class="mono" style="font-size: 0.85rem; color: var(--muted);">Package Security Scanner · CodeBERT · IE105 / UIT 2025–2026</span>
     <div style="margin-left: auto; display: flex; align-items: center; gap: .5rem;">
-      <span style="width: 7px; height: 7px; border-radius: 50%; background: #22C55E; flex-shrink: 0; box-shadow: 0 0 0 2px rgba(34,197,94,.2);"></span>
-      <span class="mono" style="font-size: .68rem; color: var(--muted);">model ready</span>
+      <span style="width: 9px; height: 9px; border-radius: 50%; background: #22C55E; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(34,197,94,.2);"></span>
+      <span class="mono" style="font-size: 0.85rem; color: var(--muted); font-weight: 500;">model ready</span>
     </div>
   </div>
 </header>
 
 <!-- ─────────── MAIN ───────────────────────────────────────────── -->
-<main style="max-width: 880px; margin: 0 auto; padding: 2.25rem 1.25rem; display: flex; flex-direction: column; gap: 2rem;">
+<main style="max-width: 1080px; margin: 0 auto; padding: 2.25rem 1.25rem; display: grid; grid-template-columns: 1fr 240px; gap: 3rem; align-items: start;">
 
-  <!-- Package Selection -->
-  <section>
+  <!-- Main Content Column -->
+  <div style="display: flex; flex-direction: column; gap: 2rem; min-width: 0;">
+
+    <!-- Package Selection -->
+    <section>
     <div class="section-label"><h2>Select Package</h2><hr/></div>
     <div id="pkg-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem;"></div>
   </section>
@@ -255,33 +284,33 @@
   <!-- Strategy Toggle -->
   <section id="strategy-section" class="hidden">
     <div class="section-label"><h2>Truncation Strategy</h2><hr/></div>
-    <div style="background: var(--amber-bg); border: 1.5px solid var(--amber-border); border-radius: 10px; padding: 1.125rem 1.25rem;">
-      <div style="display: flex; gap: .875rem; align-items: flex-start;">
-        <svg style="flex-shrink:0;margin-top:2px" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <div style="background: var(--amber-bg); border: 1.5px solid var(--amber-border); border-radius: 10px; padding: 1.25rem 1.5rem;">
+      <div style="display: flex; gap: 1rem; align-items: flex-start;">
+        <svg style="flex-shrink:0;margin-top:2px" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
           <line x1="12" y1="9" x2="12" y2="13"/><circle cx="12" cy="17" r=".5" fill="currentColor"/>
         </svg>
         <div style="flex: 1;">
-          <p class="syne" style="font-size: .8rem; font-weight: 700; color: var(--amber); margin-bottom: .375rem;">G4 Evasion Case Study — Middle-Zone Attack</p>
-          <p style="font-size: .75rem; color: #92400E; line-height: 1.65; margin-bottom: .875rem;">
+          <p class="syne" style="font-size: 0.95rem; font-weight: 700; color: var(--amber); margin-bottom: .5rem;">G4 Evasion Case Study — Middle-Zone Attack</p>
+          <p style="font-size: 0.9rem; color: #92400E; line-height: 1.65; margin-bottom: 1rem;">
             Whitespace padding đẩy
-            <code class="mono" style="background: rgba(166,87,0,.1); padding: 1px 6px; border-radius: 4px; font-size: .68rem; color: var(--amber);">exec(base64.b64decode(...))</code>
+            <code class="mono" style="background: rgba(166,87,0,.1); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: var(--amber);">exec(base64.b64decode(...))</code>
             vào vùng token 256–511. Chọn strategy để thấy tác động.
           </p>
-          <div style="display: flex; gap: .5rem; flex-wrap: wrap;">
-            <button id="btn-head"      class="strat-btn active"   onclick="setStrategy('head')">HEAD &nbsp;(0–511 tokens)</button>
-            <button id="btn-head-tail" class="strat-btn inactive" onclick="setStrategy('head_tail')">HEAD+TAIL &nbsp;(0–255 | 512+)</button>
+          <div style="display: flex; gap: .75rem; flex-wrap: wrap;">
+            <button id="btn-head"      class="strat-btn active"   onclick="setStrategy('head')" style="font-size: 0.85rem; padding: 0.5rem 1rem;">HEAD &nbsp;(0–511 tokens)</button>
+            <button id="btn-head-tail" class="strat-btn inactive" onclick="setStrategy('head_tail')" style="font-size: 0.85rem; padding: 0.5rem 1rem;">HEAD+TAIL &nbsp;(0–255 | 512+)</button>
           </div>
-          <p id="strategy-hint" class="mono" style="margin-top: .5rem; font-size: .7rem; color: var(--blue); opacity: 0; transition: opacity .25s;"></p>
+          <p id="strategy-hint" class="mono" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--blue); opacity: 0; transition: opacity .25s;"></p>
         </div>
       </div>
     </div>
   </section>
 
   <!-- Scan Button -->
-  <button id="scan-btn" onclick="startScan()" disabled>
+  <button id="scan-btn" onclick="startScan()" disabled style="font-size: 1rem; padding: 1rem 1.5rem;">
     <span id="scan-icon">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
     </span>
     <span id="scan-label">Run Detection Pipeline</span>
   </button>
@@ -296,40 +325,91 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>
         </svg>
-        <span class="syne" style="font-size: .76rem; font-weight: 700; letter-spacing: .02em;">Package Loader</span>
-        <span class="mono" style="margin-left: auto; font-size: .66rem; color: var(--muted);">PyPI registry cache</span>
+        <span class="syne" style="font-size: .76rem; font-weight: 700; letter-spacing: .02em;">Quarantine / Load</span>
+        <span class="mono" style="margin-left: auto; font-size: .66rem; color: var(--muted);">static boundary</span>
       </div>
       <div id="step-a-body" class="step-card-body"></div>
     </div>
 
-    <!-- Step B: Tokenizer -->
+    <!-- Step B: Safe Extract -->
     <div id="step-b" class="hidden step-card">
       <div class="step-card-header">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>
         </svg>
-        <span class="syne" style="font-size: .76rem; font-weight: 700; letter-spacing: .02em;">CodeBERT Tokenizer</span>
-        <span class="mono" style="margin-left: auto; font-size: .66rem; color: var(--muted);">BPE subword encoding</span>
+        <span class="syne" style="font-size: .76rem; font-weight: 700; letter-spacing: .02em;">Safe Extract</span>
+        <span class="mono" style="margin-left: auto; font-size: .66rem; color: var(--muted);">read-only source</span>
       </div>
       <div id="step-b-body" class="step-card-body" style="display: flex; flex-direction: column; gap: .5rem;"></div>
     </div>
 
-    <!-- Step C: Classifier -->
+    <!-- Step C: Tokenization + Classifier -->
     <div id="step-c" class="hidden step-card">
       <div class="step-card-header">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/>
         </svg>
-        <span class="syne" style="font-size: .76rem; font-weight: 700; letter-spacing: .02em;">Malware Classifier</span>
+        <span class="syne" style="font-size: .76rem; font-weight: 700; letter-spacing: .02em;">CodeBERT Tokenization</span>
         <span class="mono" style="margin-left: auto; font-size: .66rem; color: var(--muted);">threshold = 0.90</span>
       </div>
       <div id="step-c-body" class="step-card-body" style="display: flex; flex-direction: column; gap: 1rem;"></div>
     </div>
 
-    <!-- Step D: Verdict (rendered by JS) -->
-    <div id="step-d" class="hidden"></div>
+    <!-- Step D: Payload Evidence -->
+    <div id="step-d" class="hidden step-card">
+      <div class="step-card-header">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+        </svg>
+        <span class="syne" style="font-size: .76rem; font-weight: 700; letter-spacing: .02em;">Payload Evidence</span>
+        <span class="mono" style="margin-left: auto; font-size: .66rem; color: var(--muted);">static inspector</span>
+      </div>
+      <div id="step-d-body" class="step-card-body" style="display: flex; flex-direction: column; gap: .5rem;"></div>
+    </div>
 
-  </section>
+    <!-- Step E: Verdict (rendered by JS) -->
+    <div id="step-e" class="hidden"></div>
+
+    </section>
+  </div> <!-- End Main Content Column -->
+
+  <!-- Pipeline Progress Sidebar -->
+  <aside id="pipeline-sidebar" style="position: sticky; top: 80px; opacity: 0; transition: opacity 0.3s; pointer-events: none;">
+    <div class="section-label" style="margin-bottom: 1rem;"><h2>Pipeline Progress</h2><hr/></div>
+    <div style="position: relative; padding-left: 0.5rem;">
+      <!-- Track line -->
+      <div style="position: absolute; left: 11px; top: 12px; bottom: 20px; width: 2px; background: var(--border); z-index: 0;"></div>
+      
+      <ul style="list-style: none; display: flex; flex-direction: column; gap: 2rem; position: relative; z-index: 1;">
+        <!-- Step 1 -->
+        <li id="nav-step-a" style="display: flex; align-items: center; gap: 1rem; color: var(--muted); transition: color 0.3s;">
+          <div class="nav-indicator" style="width: 18px; height: 18px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border); transition: all 0.3s; display: flex; align-items: center; justify-content: center;"></div>
+          <span class="syne" style="font-size: 0.9rem; font-weight: 700;">Quarantine / Load</span>
+        </li>
+        <!-- Step 2 -->
+        <li id="nav-step-b" style="display: flex; align-items: center; gap: 1rem; color: var(--muted); transition: color 0.3s;">
+          <div class="nav-indicator" style="width: 18px; height: 18px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border); transition: all 0.3s; display: flex; align-items: center; justify-content: center;"></div>
+          <span class="syne" style="font-size: 0.9rem; font-weight: 700;">Safe Extract</span>
+        </li>
+        <!-- Step 3 -->
+        <li id="nav-step-c" style="display: flex; align-items: center; gap: 1rem; color: var(--muted); transition: color 0.3s;">
+          <div class="nav-indicator" style="width: 18px; height: 18px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border); transition: all 0.3s; display: flex; align-items: center; justify-content: center;"></div>
+          <span class="syne" style="font-size: 0.9rem; font-weight: 700;">CodeBERT Tokens</span>
+        </li>
+        <!-- Step 4 -->
+        <li id="nav-step-d" style="display: flex; align-items: center; gap: 1rem; color: var(--muted); transition: color 0.3s;">
+          <div class="nav-indicator" style="width: 18px; height: 18px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border); transition: all 0.3s; display: flex; align-items: center; justify-content: center;"></div>
+          <span class="syne" style="font-size: 0.9rem; font-weight: 700;">Payload Evidence</span>
+        </li>
+        <!-- Step 5 -->
+        <li id="nav-step-e" style="display: flex; align-items: center; gap: 1rem; color: var(--muted); transition: color 0.3s;">
+          <div class="nav-indicator" style="width: 18px; height: 18px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border); transition: all 0.3s; display: flex; align-items: center; justify-content: center;"></div>
+          <span class="syne" style="font-size: 0.9rem; font-weight: 700;">Final Verdict</span>
+        </li>
+      </ul>
+    </div>
+  </aside>
+
 </main>
 
 <!-- ─────────── FOOTER ─────────────────────────────────────────── -->

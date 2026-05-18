@@ -1,5 +1,5 @@
 // Pipeline step reveal delays (ms)
-const STEP_DELAYS = { A: 80, B: 900, C: 1800, D: 3300 };
+const STEP_DELAYS = { A: 80, B: 850, C: 1650, D: 2550, E: 3550 };
 
 // Lucide-compatible inline SVG snippets used in dynamic content
 const IC = {
@@ -126,11 +126,59 @@ async function startScan() {
 
 // ── Pipeline ──────────────────────────────────────────────────────────
 
+function updateSidebar(stepId, state) {
+  const el = document.getElementById(`nav-step-${stepId}`);
+  if (!el) return;
+  const ind = el.querySelector('.nav-indicator');
+  
+  if (state === 'active') {
+    el.classList.remove('done');
+    el.classList.add('active');
+    ind.innerHTML = `<span class="spinner" style="display:inline-block;width:6px;height:6px;border:1.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;"></span>`;
+  } else if (state === 'done') {
+    el.classList.remove('active');
+    el.classList.add('done');
+    ind.innerHTML = `<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+  }
+}
+
 function animatePipeline(data) {
-  setTimeout(() => renderStepA(data), STEP_DELAYS.A);
-  setTimeout(() => renderStepB(data), STEP_DELAYS.B);
-  setTimeout(() => renderStepC(data), STEP_DELAYS.C);
-  setTimeout(() => renderStepD(data), STEP_DELAYS.D);
+  const sidebar = document.getElementById('pipeline-sidebar');
+  if (sidebar) {
+    sidebar.style.opacity = '1';
+    sidebar.style.pointerEvents = 'auto';
+  }
+
+  updateSidebar('a', 'active');
+
+  setTimeout(() => {
+    updateSidebar('a', 'done');
+    updateSidebar('b', 'active');
+    renderStepA(data);
+  }, STEP_DELAYS.A);
+
+  setTimeout(() => {
+    updateSidebar('b', 'done');
+    updateSidebar('c', 'active');
+    renderStepB(data);
+  }, STEP_DELAYS.B);
+
+  setTimeout(() => {
+    updateSidebar('c', 'done');
+    updateSidebar('d', 'active');
+    renderStepC(data);
+  }, STEP_DELAYS.C);
+
+  setTimeout(() => {
+    updateSidebar('d', 'done');
+    updateSidebar('e', 'active');
+    renderStepD(data);
+  }, STEP_DELAYS.D);
+
+  setTimeout(() => {
+    updateSidebar('e', 'done');
+    renderStepE(data);
+  }, STEP_DELAYS.E);
 }
 
 function reveal(id) {
@@ -140,39 +188,34 @@ function reveal(id) {
 }
 
 function resetPipeline() {
-  ['step-a', 'step-b', 'step-c', 'step-d'].forEach(id => {
+  ['step-a', 'step-b', 'step-c', 'step-d', 'step-e'].forEach(id => {
     const el = document.getElementById(id);
     el.classList.add('hidden');
     el.classList.remove('slide-up');
   });
+  
+  ['nav-step-a', 'nav-step-b', 'nav-step-c', 'nav-step-d', 'nav-step-e'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.classList.remove('active', 'done');
+      const ind = el.querySelector('.nav-indicator');
+      if (ind) ind.innerHTML = '';
+    }
+  });
+
+  const sidebar = document.getElementById('pipeline-sidebar');
+  if (sidebar) {
+    sidebar.style.opacity = '0';
+    sidebar.style.pointerEvents = 'none';
+  }
+
   const pipeline = document.getElementById('pipeline');
   pipeline.classList.add('hidden');
   pipeline.style.display = '';
 }
 
-// Step A — Package Loader
-function renderStepA(data) {
-  const totalTok = data.files.reduce((s, f) => s + f.token_count, 0);
-  const tokenColor = data.verdict === 'malicious' ? 'var(--red)' : 'var(--green)';
-  document.getElementById('step-a-body').innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.625rem;margin-bottom:.875rem;">
-      ${statCard(data.file_count, 'Python files', 'var(--blue)')}
-      ${statCard('PyPI', 'Source', 'var(--muted)')}
-      ${statCard(totalTok.toLocaleString(), 'Total tokens', tokenColor)}
-    </div>
-    <div style="display:flex;flex-direction:column;gap:.375rem;">
-      ${data.files.map(f => `
-        <div class="file-row">
-          ${IC.fileCode}
-          <span class="mono" style="font-size:.7rem;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.filename}</span>
-          <span class="mono" style="font-size:.68rem;color:var(--muted);flex-shrink:0;">${f.token_count.toLocaleString()} tok</span>
-        </div>`).join('')}
-    </div>`;
-  reveal('step-a');
-}
-
 // Step B — Tokenizer
-function renderStepB(data) {
+function renderLegacyOldStepB(data) {
   document.getElementById('step-b-body').innerHTML = data.files.map(f => `
     <div class="file-row" style="justify-content:space-between;">
       <span class="mono" style="font-size:.7rem;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.filename}</span>
@@ -195,7 +238,7 @@ function renderStepB(data) {
 }
 
 // Step C — Classifier
-function renderStepC(data) {
+function renderLegacyOldStepC(data) {
   document.getElementById('step-c-body').innerHTML = data.files.map((f, i) => {
     const mal  = f.label === 'malicious';
     const pct  = Math.round(f.probability * 100);
@@ -225,7 +268,7 @@ function renderStepC(data) {
 }
 
 // Step D — Verdict
-function renderStepD(data) {
+function renderLegacyOldStepD(data) {
   const mal     = data.verdict === 'malicious';
   const flagged = data.files.filter(f => f.label === 'malicious');
   const worst   = flagged.sort((a, b) => b.probability - a.probability)[0];
@@ -285,6 +328,192 @@ function renderStepD(data) {
   reveal('step-d');
 }
 
+// Step A - Quarantine / Load
+function renderStepA(data) {
+  const sandbox = data.sandbox || {};
+  const provenance = data.provenance || {};
+  document.getElementById('step-a-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.625rem;margin-bottom:.875rem;">
+      ${statCard(data.file_count, 'quarantined files', 'var(--blue)')}
+      ${statCard(sandbox.executed === false ? 'NO' : 'N/A', 'executed', 'var(--green)')}
+      ${statCard(sandbox.network_blocked ? 'ON' : 'N/A', 'network block', 'var(--green)')}
+    </div>
+    <div style="display:flex;align-items:center;gap:.375rem;padding:.625rem .75rem;background:var(--green-bg);border-radius:6px;border:1px solid var(--green-border);margin-bottom:.75rem;">
+      <span style="color:var(--green);">${IC.info}</span>
+      <span class="mono" style="font-size:.68rem;color:var(--green);">analysis_mode=${escapeHtml(sandbox.analysis_mode || 'static')} · source=${escapeHtml(provenance.sample_source || 'local fixture')}</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.375rem;">
+      ${data.files.map(f => `
+        <div class="file-row">
+          ${IC.fileCode}
+          <span class="mono" style="font-size:.7rem;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(f.filename)}</span>
+          <span class="mono" style="font-size:.68rem;color:var(--muted);flex-shrink:0;">sha256 ${escapeHtml((f.sha256 || '').slice(0, 10))}</span>
+        </div>`).join('')}
+    </div>`;
+  reveal('step-a');
+}
+
+// Step B - Safe Extract
+function renderStepB(data) {
+  document.getElementById('step-b-body').innerHTML = data.files.map(f => `
+    <div class="file-row" style="justify-content:space-between;">
+      <span class="mono" style="font-size:.7rem;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(f.filename)}</span>
+      <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
+        <span class="mono" style="font-size:.68rem;color:var(--muted);">${f.payload_evidence_count || 0} static indicator(s)</span>
+        <span class="badge badge-neutral">read-only</span>
+      </div>
+    </div>`).join('') + `
+    <div style="display:flex;align-items:center;gap:.375rem;padding:.5rem .625rem;background:#EFF6FF;border-radius:6px;border:1px solid #BFDBFE;">
+      <span style="color:var(--blue);">${IC.info}</span>
+      <span class="mono" style="font-size:.68rem;color:var(--blue);">Source text only: no pip install, import, setup.py execution, URL fetch, or shell command.</span>
+    </div>`;
+  reveal('step-b');
+}
+
+// Step C - CodeBERT Tokenization
+function renderStepC(data) {
+  const tokenRows = data.files.map(f => `
+    <div class="file-row" style="justify-content:space-between;">
+      <span class="mono" style="font-size:.7rem;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(f.filename)}</span>
+      <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
+        <span class="mono" style="font-size:.68rem;color:var(--muted);">${f.token_count} tokens</span>
+        ${f.is_truncated ? `<span class="badge badge-amber">TRUNCATED &gt;512</span>` : `<span class="badge badge-neutral">fits 512</span>`}
+      </div>
+    </div>`).join('');
+
+  const probabilityRows = data.files.map((f, i) => {
+    const mal  = f.label === 'malicious';
+    const pct  = Math.round(f.probability * 100);
+    const clr  = mal ? 'var(--red)' : 'var(--green)';
+    const pill = mal ? 'badge-red' : 'badge-green';
+    return `
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.375rem;">
+        <span class="mono" style="font-size:.7rem;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:.625rem;">${escapeHtml(f.filename)}</span>
+        <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
+          <span class="mono" style="font-size:.75rem;font-weight:500;color:${clr};">${f.probability.toFixed(4)}</span>
+          <span class="badge ${pill}">${f.label}</span>
+        </div>
+      </div>
+      <div style="height:5px;background:var(--surface-2);border-radius:3px;border:1px solid var(--border);overflow:hidden;">
+        <div id="bar-${i}" class="prob-bar" style="width:0%;height:100%;background:${clr};border-radius:3px;"></div>
+      </div>
+      <p class="mono" style="margin-top:.25rem;font-size:.65rem;color:var(--muted);">P(malicious) = ${pct}%</p>
+    </div>`;
+  }).join('');
+
+  document.getElementById('step-c-body').innerHTML = tokenRows + (data.truncated_count > 0 ? `
+    <div style="display:flex;align-items:center;gap:.375rem;padding:.5rem .625rem;background:var(--amber-bg);border-radius:6px;border:1px solid var(--amber-border);">
+      <span style="color:var(--amber);">${IC.alert}</span>
+      <span class="mono" style="font-size:.68rem;color:var(--amber);">${data.truncated_count}/${data.file_count} file(s) exceed 512-token limit · strategy: ${escapeHtml(data.strategy)}</span>
+    </div>` : `
+    <div style="display:flex;align-items:center;gap:.375rem;padding:.5rem .625rem;background:var(--green-bg);border-radius:6px;border:1px solid var(--green-border);">
+      <span style="color:var(--green);">${IC.info}</span>
+      <span class="mono" style="font-size:.68rem;color:var(--green);">All files within 512-token window; no truncation applied.</span>
+    </div>`) + `<div style="height:1px;background:var(--border);margin:.375rem 0;"></div>` + probabilityRows;
+  reveal('step-c');
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    data.files.forEach((f, i) => {
+      const bar = document.getElementById(`bar-${i}`);
+      if (bar) bar.style.width = Math.round(f.probability * 100) + '%';
+    });
+  }));
+}
+
+// Step D - Payload Evidence
+function renderStepD(data) {
+  const evidence = data.payload_evidence || [];
+  const evidenceHtml = evidence.length ? evidence.slice(0, 12).map(item => {
+    const badge = item.severity === 'high' ? 'badge-red' : 'badge-amber';
+    return `
+      <div class="file-row" style="align-items:flex-start;">
+        <span class="badge ${badge}" style="flex-shrink:0;">${escapeHtml(item.kind)}</span>
+        <div style="min-width:0;flex:1;">
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem;">
+            <span class="syne" style="font-size:.75rem;font-weight:700;color:var(--text);">${escapeHtml(item.label)}</span>
+            <span class="mono" style="font-size:.63rem;color:var(--muted);">${escapeHtml(item.filename || 'package')} · ${escapeHtml(item.source || 'source')}</span>
+          </div>
+          <code class="mono" style="display:block;font-size:.66rem;line-height:1.55;color:var(--muted);white-space:normal;word-break:break-word;">${escapeHtml(item.value)}</code>
+        </div>
+      </div>`;
+  }).join('') : `
+      <div style="display:flex;align-items:center;gap:.375rem;padding:.625rem .75rem;background:var(--green-bg);border-radius:6px;border:1px solid var(--green-border);">
+        <span style="color:var(--green);">${IC.info}</span>
+        <span class="mono" style="font-size:.68rem;color:var(--green);">No decoded payload, URL, persistence path, or command indicator found.</span>
+      </div>`;
+
+  const cmp = data.strategy_comparison ? `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.625rem;margin-top:.75rem;">
+      ${statCard(data.strategy_comparison.head.toFixed(4), 'HEAD P(mal)', data.strategy_comparison.head >= data.strategy_comparison.threshold ? 'var(--red)' : 'var(--green)')}
+      ${statCard(data.strategy_comparison.head_tail.toFixed(4), 'HEAD+TAIL P(mal)', data.strategy_comparison.head_tail >= data.strategy_comparison.threshold ? 'var(--red)' : 'var(--amber)')}
+      ${statCard(data.strategy_comparison.threshold.toFixed(2), 'threshold', 'var(--muted)')}
+    </div>` : '';
+
+  document.getElementById('step-d-body').innerHTML = evidenceHtml + cmp;
+  reveal('step-d');
+}
+
+// Step E - Verdict
+function renderStepE(data) {
+  const mal     = data.verdict === 'malicious';
+  const flagged = data.files.filter(f => f.label === 'malicious');
+  const worst   = flagged.sort((a, b) => b.probability - a.probability)[0];
+
+  const clr  = mal ? 'var(--red)'   : 'var(--green)';
+  const icon = mal ? IC.shieldX     : IC.shieldOk;
+  const cls  = mal ? 'mal'          : 'ok';
+  const word = mal ? 'MALICIOUS'    : 'CLEAN';
+
+  let evNote = '';
+  if (data.strategy_demo) {
+    if (!mal && data.strategy === 'head_tail') {
+      evNote = `
+        <div style="display:flex;gap:.625rem;align-items:flex-start;padding:.875rem 1rem;background:var(--amber-bg);border:1.5px solid var(--amber-border);border-radius:8px;margin-top:.75rem;">
+          <span style="color:var(--amber);flex-shrink:0;margin-top:1px;">${IC.alert}</span>
+          <div>
+            <p class="syne" style="font-size:.78rem;font-weight:700;color:var(--amber);margin-bottom:.25rem;">Evasion succeeds under HEAD+TAIL</p>
+            <p style="font-size:.73rem;color:#92400E;line-height:1.6;">HEAD+TAIL skips the token 256-511 region where this demo payload is hidden. Static evidence still exposes the decoded payload without running it.</p>
+          </div>
+        </div>`;
+    } else if (mal && data.strategy === 'head') {
+      evNote = `
+        <div style="display:flex;gap:.625rem;align-items:flex-start;padding:.875rem 1rem;background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:8px;margin-top:.75rem;">
+          <span style="color:var(--blue);flex-shrink:0;margin-top:1px;">${IC.info}</span>
+          <div>
+            <p class="syne" style="font-size:.78rem;font-weight:700;color:var(--blue);margin-bottom:.25rem;">HEAD strategy covers token 256-511</p>
+            <p style="font-size:.73rem;color:#1e40af;line-height:1.6;">HEAD sees the middle-zone payload in this sample. Switch to HEAD+TAIL to demonstrate the false-negative boundary.</p>
+          </div>
+        </div>`;
+    }
+  }
+
+  const previewBlock = (mal && worst) ? `
+    <div class="code-block" style="margin-top:.75rem;">
+      <div class="code-header">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        <span class="mono" style="font-size:.65rem;color:var(--muted);">Flagged: ${escapeHtml(worst.filename)} · P = ${worst.probability.toFixed(4)}</span>
+      </div>
+      <pre style="padding:.875rem;overflow-x:auto;max-height:200px;overflow-y:auto;"><code class="language-python hljs">${hljs.highlight(worst.preview, { language: 'python', ignoreIllegals: true }).value}</code></pre>
+    </div>` : '';
+
+  const el = document.getElementById('step-e');
+  el.innerHTML = `
+    <div class="verdict-card ${cls}">
+      <div style="color:${clr};">${icon}</div>
+      <div style="flex:1;">
+        <div class="syne" style="font-size:1.625rem;font-weight:800;letter-spacing:-.02em;color:${clr};line-height:1;">${word}</div>
+        <div class="mono" style="font-size:.68rem;color:var(--muted);margin-top:.375rem;">${escapeHtml(data.display_name)}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.25rem;align-items:flex-end;flex-shrink:0;">
+        <span class="mono" style="font-size:.68rem;color:var(--muted);">${data.file_count} file(s) scanned</span>
+        <span class="mono" style="font-size:.68rem;color:var(--muted);">${flagged.length} flagged · strategy: ${escapeHtml(data.strategy)}</span>
+        ${worst ? `<span class="mono" style="font-size:.68rem;color:${clr};font-weight:500;">max P = ${worst.probability.toFixed(4)}</span>` : ''}
+      </div>
+    </div>
+    ${evNote}${previewBlock}`;
+  reveal('step-e');
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function statCard(value, label, color) {
@@ -293,4 +522,13 @@ function statCard(value, label, color) {
       <div class="syne" style="font-size:1.2rem;font-weight:800;color:${color};letter-spacing:-.01em;">${value}</div>
       <div style="font-size:.65rem;color:var(--muted);margin-top:.25rem;">${label}</div>
     </div>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
